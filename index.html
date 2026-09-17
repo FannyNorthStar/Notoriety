@@ -555,8 +555,10 @@ tr:hover td { background: var(--surface-2); }
 <!-- TOOLTIP -->
 <div class="tooltip" id="tooltip"></div>
 
-<!-- OpenAI config (gitignored) -->
-<script>var OPENAI_API_KEY = '';</script>
+<!-- AI proxy: Google Apps Script URL (stores OpenAI key server-side) -->
+<script>
+var AI_PROXY_URL = ''; // Set your deployed Apps Script URL here
+</script>
 <script src="config.js" onerror=""></script>
 
 <script>
@@ -1080,13 +1082,18 @@ function renderSiteGrid() {
   document.getElementById('siteGrid').innerHTML = sites.map(s => {
     const eff = getSiteEffectiveData(s, month);
     const prevData = eff.isFallback ? null : (prevMonth ? getSiteMonthData(s, prevMonth) : null);
-    const impChange = prevData && prevData.impressions > 0 ? fmt.change(eff.impressions, prevData.impressions) : { text: '', cls: 'flat' };
+    const posChange = prevData && prevData.position > 0 && eff.position > 0 ? (() => {
+      const diff = eff.position - prevData.position;
+      if (Math.abs(diff) < 0.1) return { text: '', cls: 'flat' };
+      // Lower position = better, so negative diff = improvement = green
+      return { text: (diff > 0 ? '+' : '') + diff.toFixed(1), cls: diff < 0 ? 'up' : 'down' };
+    })() : { text: '', cls: 'flat' };
     const fallbackNote = eff.isFallback ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Latest data: ${fmt.monthLabel(eff.effectiveMonth)}</div>` : '';
     return `<div class="site-card" data-site="${s.code}">
       <div class="site-card-header"><span class="site-card-name">${s.name}</span><span class="site-card-lang">${s.lang}</span></div>
       <div class="site-card-stats">
-        <div><div class="site-stat-label">Impressions</div><div class="site-stat-value">${fmt.num(eff.impressions)} ${impChange.text ? `<span class="kpi-change ${impChange.cls}" style="font-size:11px">${impChange.text} MoM</span>` : ''}</div></div>
-        <div><div class="site-stat-label">Avg Position</div><div class="site-stat-value">${fmt.pos(eff.position)}</div></div>
+        <div><div class="site-stat-label">Impressions</div><div class="site-stat-value">${fmt.num(eff.impressions)}</div></div>
+        <div><div class="site-stat-label">Avg Position</div><div class="site-stat-value">${fmt.pos(eff.position)} ${posChange.text ? `<span class="kpi-change ${posChange.cls}" style="font-size:11px">${posChange.text} MoM</span>` : ''}</div></div>
         <div><div class="site-stat-label">CTR</div><div class="site-stat-value">${fmt.pct(eff.ctr)}</div></div>
         <div><div class="site-stat-label">Queries</div><div class="site-stat-value">${s.queries.length}</div></div>
       </div>${fallbackNote}
@@ -1095,12 +1102,12 @@ function renderSiteGrid() {
   }).join('');
   document.querySelectorAll('.site-card').forEach(c => c.addEventListener('click', () => { state.selectedSite = c.dataset.site; switchTab('detail'); }));
   // Trigger AI summaries for all visible sites
-  if (OPENAI_API_KEY) {
+  if (AI_PROXY_URL) {
     generateSiteAISummaries(sites);
   } else {
     sites.forEach(s => {
       const el = document.getElementById('ai-' + s.code);
-      if (el) { el.textContent = 'Add API key in config.js for AI analysis'; el.classList.remove('loading'); }
+      if (el) { el.textContent = 'Set AI_PROXY_URL in config.js for AI analysis'; el.classList.remove('loading'); }
     });
   }
 }
@@ -1207,8 +1214,8 @@ function switchTab(tab) {
 // ======================================================
 async function generateInsights(scope) {
   const panel = scope === 'overview' ? document.getElementById('aiInsightsOverview') : document.getElementById('aiInsightsDetail');
-  if (!OPENAI_API_KEY) {
-    panel.innerHTML = `<div class="ai-panel"><div class="ai-panel-header"><span class="ai-panel-title">AI Insights</span></div><div class="ai-panel-body"><p style="color:var(--text-muted)">Add your OpenAI API key in config.js to enable AI-generated insights.</p></div></div>`;
+  if (!AI_PROXY_URL) {
+    panel.innerHTML = `<div class="ai-panel"><div class="ai-panel-header"><span class="ai-panel-title">AI Insights</span></div><div class="ai-panel-body"><p style="color:var(--text-muted)">Set your AI_PROXY_URL in config.js to enable AI-generated insights.</p></div></div>`;
     return;
   }
   panel.innerHTML = `<div class="ai-panel"><div class="ai-loading"><div class="spinner"></div>Generating insights...</div></div>`;
@@ -1229,12 +1236,12 @@ async function generateInsights(scope) {
     prompt = `You are a search analytics expert. Analyze ${site.name}'s search query performance for ${fmt.monthLabel(month)}.\n\n${site.objectives ? 'Objectives: ' + site.objectives + '\n\n' : ''}Queries:\n${qd}\n\nGive: 1) Trend summary (2 sentences), 2) Highest visibility queries, 3) Best CTR performers, 4) Flags/concerns. Keep it brief and direct.`;
   }
   try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
-      body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], max_tokens: 500, temperature: 0.3 })
+    const res = await fetch(AI_PROXY_URL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: prompt, max_tokens: 500 })
     });
     const data = await res.json();
-    const text = data.choices?.[0]?.message?.content || 'No response generated.';
+    const text = data.text || data.choices?.[0]?.message?.content || 'No response generated.';
     panel.innerHTML = `<div class="ai-panel"><div class="ai-panel-header"><span class="ai-panel-title">AI Insights — ${fmt.monthLabel(month)}</span></div><div class="ai-panel-body">${text.split('\n').filter(l => l.trim()).map(l => `<p>${l}</p>`).join('')}</div></div>`;
   } catch (err) {
     panel.innerHTML = `<div class="ai-panel"><div class="ai-panel-body" style="color:var(--negative)">Failed to generate insights: ${err.message}</div></div>`;
@@ -1261,13 +1268,13 @@ async function generateSiteAISummaries(sites) {
       }).join('; ');
       const prompt = `You are a search analytics expert. In exactly 1-2 sentences, summarize the search notoriety status of ${site.name} for ${fmt.monthLabel(month)}. Data: ${curr.impressions} impressions (${prev ? ((curr.impressions - prev.impressions) / (prev.impressions || 1) * 100).toFixed(0) + '% MoM' : 'no prior month'}), CTR ${curr.ctr.toFixed(1)}%, avg position ${curr.position.toFixed(1)}, ${site.queries.length} queries tracked. Top queries: ${qSummary}. ${site.objectives ? 'Objectives: ' + site.objectives.split('\n')[0] : ''}. Be direct and specific. No intro phrases.`;
       try {
-        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        const res = await fetch(AI_PROXY_URL, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
-          body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], max_tokens: 100, temperature: 0.3 })
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: prompt, max_tokens: 100 })
         });
         const data = await res.json();
-        const text = data.choices?.[0]?.message?.content || '';
+        const text = data.text || data.choices?.[0]?.message?.content || '';
         el.textContent = text;
         el.classList.remove('loading');
       } catch (err) {
