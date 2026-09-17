@@ -787,18 +787,21 @@ function getFilteredSites() {
 }
 
 function getSiteMonthData(site, month) {
-  let totalImp = 0, totalClicks = 0, posSum = 0, posCount = 0;
+  let totalImp = 0, totalClicks = 0, posSum = 0, posCount = 0, ctrSum = 0, ctrCount = 0;
   for (const q of site.queries) {
     const m = q.months[month];
     if (m) {
       totalImp += m.impressions;
       totalClicks += m.clicks;
       if (m.position > 0) { posSum += m.position; posCount++; }
+      if (m.ctr > 0) { ctrSum += m.ctr; ctrCount++; }
     }
   }
+  // CTR = average of per-query CTRs (not total clicks/impressions)
+  const avgCtr = ctrCount > 0 ? ctrSum / ctrCount : 0;
   return {
     impressions: totalImp, clicks: totalClicks,
-    ctr: totalImp > 0 ? (totalClicks / totalImp * 100) : 0,
+    ctr: Math.min(avgCtr, 100),
     position: posCount > 0 ? posSum / posCount : 0
   };
 }
