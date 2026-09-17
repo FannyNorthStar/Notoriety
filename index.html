@@ -1001,17 +1001,73 @@ function renderAlerts() {
     const curr = getSiteMonthData(s, month), prev = getSiteMonthData(s, prevMonth);
     // Skip sites with no data in current month (not yet uploaded)
     if (curr.impressions === 0 && curr.clicks === 0) continue;
-    if (prev.impressions > 0) {
-      const dropPct = (curr.impressions - prev.impressions) / prev.impressions * 100;
-      if (dropPct < -30) alerts.push({ type: 'bad', text: `<strong>${s.name}</strong> impressions dropped ${Math.abs(dropPct).toFixed(0)}% (${fmt.num(prev.impressions)} → ${fmt.num(curr.impressions)})` });
-      if (dropPct > 50) alerts.push({ type: 'good', text: `<strong>${s.name}</strong> impressions grew ${dropPct.toFixed(0)}% (${fmt.num(prev.impressions)} → ${fmt.num(curr.impressions)})` });
+
+    // Position alerts (primary notoriety indicator)
+    const posWorsened = [], posImproved = [];
+    for (const q of s.queries) {
+      const cm = q.months[month], pm = q.months[prevMonth];
+      if (!cm || !pm || cm.position <= 0 || pm.position <= 0) continue;
+      const diff = cm.position - pm.position;
+      if (diff > 2) posWorsened.push({ query: q.query, from: pm.position, to: cm.position, diff });
+      if (diff < -2) posImproved.push({ query: q.query, from: pm.position, to: cm.position, diff });
     }
-    if (curr.position > 0 && prev.position > 0 && curr.position - prev.position > 2)
-      alerts.push({ type: 'warn', text: `<strong>${s.name}</strong> avg position worsened by ${(curr.position - prev.position).toFixed(1)} (${fmt.pos(prev.position)} → ${fmt.pos(curr.position)})` });
-    if (prev.ctr > 0 && curr.ctr > 0 && curr.ctr < prev.ctr * 0.7)
-      alerts.push({ type: 'warn', text: `<strong>${s.name}</strong> CTR dropped significantly (${fmt.pct(prev.ctr)} → ${fmt.pct(curr.ctr)})` });
+    if (posWorsened.length > 0) {
+      const details = posWorsened.slice(0, 3).map(q => `"${q.query}" ${fmt.pos(q.from)}→${fmt.pos(q.to)}`).join(', ');
+      const more = posWorsened.length > 3 ? ` +${posWorsened.length - 3} more` : '';
+      alerts.push({ type: 'bad', text: `<strong>${s.name}</strong> position worsened on: ${details}${more}` });
+    }
+    if (posImproved.length > 0) {
+      const details = posImproved.slice(0, 3).map(q => `"${q.query}" ${fmt.pos(q.from)}→${fmt.pos(q.to)}`).join(', ');
+      const more = posImproved.length > 3 ? ` +${posImproved.length - 3} more` : '';
+      alerts.push({ type: 'good', text: `<strong>${s.name}</strong> position improved on: ${details}${more}` });
+    }
+
+    // CTR alerts with query detail
+    const ctrDropped = [];
+    for (const q of s.queries) {
+      const cm = q.months[month], pm = q.months[prevMonth];
+      if (!cm || !pm || pm.ctr <= 0 || cm.ctr <= 0) continue;
+      if (cm.ctr < pm.ctr * 0.7) ctrDropped.push({ query: q.query, from: pm.ctr, to: cm.ctr });
+    }
+    if (ctrDropped.length > 0) {
+      const details = ctrDropped.slice(0, 3).map(q => `"${q.query}" ${fmt.pct(q.from)}→${fmt.pct(q.to)}`).join(', ');
+      const more = ctrDropped.length > 3 ? ` +${ctrDropped.length - 3} more` : '';
+      alerts.push({ type: 'warn', text: `<strong>${s.name}</strong> CTR dropped on: ${details}${more}` });
+    }
+
+    // Impression alerts with query detail (volume can change based on news, less critical)
+    if (prev.impressions > 1000) {
+      const dropPct = (curr.impressions - prev.impressions) / prev.impressions * 100;
+      if (dropPct < -30) {
+        const dropped = [];
+        for (const q of s.queries) {
+          const cm = q.months[month], pm = q.months[prevMonth];
+          if (!cm || !pm || pm.impressions <= 0) continue;
+          const qDrop = (cm.impressions - pm.impressions) / pm.impressions * 100;
+          if (qDrop < -30) dropped.push({ query: q.query, from: pm.impressions, to: cm.impressions, pct: qDrop });
+        }
+        dropped.sort((a, b) => a.pct - b.pct);
+        const details = dropped.slice(0, 3).map(q => `"${q.query}" ${fmt.num(q.from)}→${fmt.num(q.to)}`).join(', ');
+        const more = dropped.length > 3 ? ` +${dropped.length - 3} more` : '';
+        alerts.push({ type: 'warn', text: `<strong>${s.name}</strong> impressions dropped ${Math.abs(dropPct).toFixed(0)}% MoM. Driven by: ${details || 'spread across queries'}${more}` });
+      }
+      if (dropPct > 50) {
+        const grew = [];
+        for (const q of s.queries) {
+          const cm = q.months[month], pm = q.months[prevMonth];
+          if (!cm || !pm || pm.impressions <= 0) continue;
+          const qGrow = (cm.impressions - pm.impressions) / pm.impressions * 100;
+          if (qGrow > 50) grew.push({ query: q.query, from: pm.impressions, to: cm.impressions, pct: qGrow });
+        }
+        grew.sort((a, b) => b.pct - a.pct);
+        const details = grew.slice(0, 3).map(q => `"${q.query}" ${fmt.num(q.from)}→${fmt.num(q.to)}`).join(', ');
+        const more = grew.length > 3 ? ` +${grew.length - 3} more` : '';
+        alerts.push({ type: 'good', text: `<strong>${s.name}</strong> impressions grew ${dropPct.toFixed(0)}% MoM. Driven by: ${details || 'spread across queries'}${more}` });
+      }
+    }
   }
 
+  // Sort: position alerts first (most important for notoriety), then CTR, then impressions
   alerts.sort((a, b) => ({ bad: 0, warn: 1, good: 2 }[a.type] - { bad: 0, warn: 1, good: 2 }[b.type]));
   const icons = { bad: '&#9888;', warn: '&#9888;', good: '&#10003;' };
   document.getElementById('alerts').innerHTML = alerts.length === 0 ? '' :
