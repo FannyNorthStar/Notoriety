@@ -803,11 +803,35 @@ function getSiteMonthData(site, month) {
   };
 }
 
+// Find the latest month that has actual data for a site
+function getLatestMonthWithData(site, upToMonth) {
+  const idx = DATA.months.indexOf(upToMonth);
+  for (let i = idx; i >= 0; i--) {
+    const d = getSiteMonthData(site, DATA.months[i]);
+    if (d.impressions > 0) return DATA.months[i];
+  }
+  return null;
+}
+
+// Get site data for selected month, falling back to latest available
+function getSiteEffectiveData(site, month) {
+  const d = getSiteMonthData(site, month);
+  if (d.impressions > 0) return { ...d, effectiveMonth: month };
+  const fallback = getLatestMonthWithData(site, month);
+  if (fallback) {
+    const fd = getSiteMonthData(site, fallback);
+    return { ...fd, effectiveMonth: fallback, isFallback: true };
+  }
+  return { ...d, effectiveMonth: month };
+}
+
 function getNetworkMonthData(month) {
   const sites = getFilteredSites();
-  let totalImp = 0, totalClicks = 0, posSum = 0, posCount = 0;
+  let totalImp = 0, totalClicks = 0, posSum = 0, posCount = 0, activeSites = 0;
   for (const s of sites) {
     const d = getSiteMonthData(s, month);
+    if (d.impressions === 0 && d.clicks === 0) continue; // skip sites with no data this month
+    activeSites++;
     totalImp += d.impressions;
     totalClicks += d.clicks;
     if (d.position > 0) { posSum += d.position; posCount++; }
@@ -816,7 +840,7 @@ function getNetworkMonthData(month) {
     impressions: totalImp, clicks: totalClicks,
     ctr: totalImp > 0 ? (totalClicks / totalImp * 100) : 0,
     position: posCount > 0 ? posSum / posCount : 0,
-    sites: sites.length, queries: sites.reduce((a, s) => a + s.queries.length, 0)
+    sites: activeSites, queries: sites.reduce((a, s) => a + s.queries.length, 0)
   };
 }
 
@@ -972,6 +996,8 @@ function renderAlerts() {
 
   for (const s of sites) {
     const curr = getSiteMonthData(s, month), prev = getSiteMonthData(s, prevMonth);
+    // Skip sites with no data in current month (not yet uploaded)
+    if (curr.impressions === 0 && curr.clicks === 0) continue;
     if (prev.impressions > 0) {
       const dropPct = (curr.impressions - prev.impressions) / prev.impressions * 100;
       if (dropPct < -30) alerts.push({ type: 'bad', text: `<strong>${s.name}</strong> impressions dropped ${Math.abs(dropPct).toFixed(0)}% (${fmt.num(prev.impressions)} → ${fmt.num(curr.impressions)})` });
@@ -979,7 +1005,7 @@ function renderAlerts() {
     }
     if (curr.position > 0 && prev.position > 0 && curr.position - prev.position > 2)
       alerts.push({ type: 'warn', text: `<strong>${s.name}</strong> avg position worsened by ${(curr.position - prev.position).toFixed(1)} (${fmt.pos(prev.position)} → ${fmt.pos(curr.position)})` });
-    if (prev.ctr > 0 && curr.ctr < prev.ctr * 0.7)
+    if (prev.ctr > 0 && curr.ctr > 0 && curr.ctr < prev.ctr * 0.7)
       alerts.push({ type: 'warn', text: `<strong>${s.name}</strong> CTR dropped significantly (${fmt.pct(prev.ctr)} → ${fmt.pct(curr.ctr)})` });
   }
 
@@ -993,17 +1019,18 @@ function renderSiteGrid() {
   const month = state.month, prevMonth = getPrevMonth(month);
   const sites = getFilteredSites();
   document.getElementById('siteGrid').innerHTML = sites.map(s => {
-    const curr = getSiteMonthData(s, month);
-    const prev = prevMonth ? getSiteMonthData(s, prevMonth) : null;
-    const impChange = prev ? fmt.change(curr.impressions, prev.impressions) : { text: '', cls: 'flat' };
+    const eff = getSiteEffectiveData(s, month);
+    const prevData = eff.isFallback ? null : (prevMonth ? getSiteMonthData(s, prevMonth) : null);
+    const impChange = prevData && prevData.impressions > 0 ? fmt.change(eff.impressions, prevData.impressions) : { text: '', cls: 'flat' };
+    const fallbackNote = eff.isFallback ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Latest data: ${fmt.monthLabel(eff.effectiveMonth)}</div>` : '';
     return `<div class="site-card" data-site="${s.code}">
       <div class="site-card-header"><span class="site-card-name">${s.name}</span><span class="site-card-lang">${s.lang}</span></div>
       <div class="site-card-stats">
-        <div><div class="site-stat-label">Impressions</div><div class="site-stat-value">${fmt.num(curr.impressions)} <span class="kpi-change ${impChange.cls}" style="font-size:11px">${impChange.text} MoM</span></div></div>
-        <div><div class="site-stat-label">Avg Position</div><div class="site-stat-value">${fmt.pos(curr.position)}</div></div>
-        <div><div class="site-stat-label">CTR</div><div class="site-stat-value">${fmt.pct(curr.ctr)}</div></div>
+        <div><div class="site-stat-label">Impressions</div><div class="site-stat-value">${fmt.num(eff.impressions)} ${impChange.text ? `<span class="kpi-change ${impChange.cls}" style="font-size:11px">${impChange.text} MoM</span>` : ''}</div></div>
+        <div><div class="site-stat-label">Avg Position</div><div class="site-stat-value">${fmt.pos(eff.position)}</div></div>
+        <div><div class="site-stat-label">CTR</div><div class="site-stat-value">${fmt.pct(eff.ctr)}</div></div>
         <div><div class="site-stat-label">Queries</div><div class="site-stat-value">${s.queries.length}</div></div>
-      </div>
+      </div>${fallbackNote}
       <div class="site-ai-summary loading" id="ai-${s.code}">AI analysis loading...</div>
       </div>`;
   }).join('');
