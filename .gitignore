@@ -1,0 +1,4 @@
+config.js
+*.key
+.env
+.DS_Store
