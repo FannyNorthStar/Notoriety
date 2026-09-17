@@ -335,6 +335,11 @@ select:focus, button:focus { outline: 2px solid var(--accent); outline-offset: -
 .site-card-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .site-stat-label { font-size: 11px; color: var(--text-muted); }
 .site-stat-value { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.site-ai-summary {
+  margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);
+  font-size: 12px; color: var(--text-secondary); line-height: 1.5;
+}
+.site-ai-summary.loading { color: var(--text-muted); font-style: italic; }
 
 /* ---- CHART ---- */
 .chart-wrap { position: relative; width: 100%; overflow-x: auto; }
@@ -750,7 +755,13 @@ let state = { lang: 'all', month: null, tab: 'overview', selectedSite: null, sor
 // HELPERS
 // ======================================================
 const fmt = {
-  num: n => n == null ? '—' : n.toLocaleString('en-US'),
+  num: n => {
+    if (n == null) return '—';
+    if (Math.abs(n) >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (Math.abs(n) >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+    return n.toLocaleString('en-US');
+  },
+  numFull: n => n == null ? '—' : n.toLocaleString('en-US'),
   pct: n => n == null ? '—' : n.toFixed(1) + '%',
   pos: n => n == null ? '—' : n.toFixed(1),
   change: (curr, prev) => {
@@ -766,7 +777,8 @@ const fmt = {
   },
   shortMonth: m => {
     const [y, mo] = m.split('-');
-    return ['J','F','M','A','M','J','J','A','S','O','N','D'][parseInt(mo)-1];
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return months[parseInt(mo)-1] + ' ' + y.slice(2);
   }
 };
 
@@ -820,8 +832,8 @@ const COLORS = ['var(--series-1)','var(--series-2)','var(--series-3)','var(--ser
   'var(--series-5)','var(--series-6)','var(--series-7)','var(--series-8)'];
 
 function createLineChart(container, series, months, opts = {}) {
-  const W = opts.width || 520, H = opts.height || 220;
-  const pad = { top: 20, right: 20, bottom: 36, left: 56 };
+  const W = opts.width || 560, H = opts.height || 240;
+  const pad = { top: 20, right: 24, bottom: 40, left: 60 };
   const cw = W - pad.left - pad.right;
   const ch = H - pad.top - pad.bottom;
 
@@ -847,13 +859,14 @@ function createLineChart(container, series, months, opts = {}) {
     const y = pad.top + (i / 4) * ch;
     const val = opts.invertY ? yMin + (i / 4) * (yMax - yMin) : yMax - (i / 4) * (yMax - yMin);
     svg += `<line x1="${pad.left}" y1="${y}" x2="${W - pad.right}" y2="${y}" stroke="var(--chart-grid)" stroke-width="1"/>`;
-    svg += `<text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" fill="var(--chart-text-muted)" font-size="11">${opts.fmtY ? opts.fmtY(val) : Math.round(val)}</text>`;
+    svg += `<text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" fill="var(--chart-text-muted)" font-size="10">${opts.fmtY ? opts.fmtY(val) : fmt.num(Math.round(val))}</text>`;
   }
 
   // X labels
+  const skipX = months.length > 8 ? 3 : months.length > 5 ? 2 : 1;
   for (let i = 0; i < months.length; i++) {
-    if (months.length > 8 && i % 2 !== 0 && i !== months.length - 1) continue;
-    svg += `<text x="${xScale(i)}" y="${H - 4}" text-anchor="middle" fill="var(--chart-text-muted)" font-size="11">${fmt.shortMonth(months[i])}</text>`;
+    if (skipX > 1 && i % skipX !== 0 && i !== months.length - 1) continue;
+    svg += `<text x="${xScale(i)}" y="${H - 4}" text-anchor="middle" fill="var(--chart-text-muted)" font-size="10">${fmt.shortMonth(months[i])}</text>`;
   }
 
   // Lines + points
@@ -890,7 +903,7 @@ function createLineChart(container, series, months, opts = {}) {
       let html = `<div class="tooltip-title">${fmt.monthLabel(month)}</div>`;
       for (let si = 0; si < series.length; si++) {
         const val = series[si].data[month];
-        if (val != null) html += `<div class="tooltip-row"><span class="tooltip-label">${series[si].label}</span><span class="tooltip-value">${opts.fmtY ? opts.fmtY(val) : fmt.num(val)}</span></div>`;
+        if (val != null) html += `<div class="tooltip-row"><span class="tooltip-label">${series[si].label}</span><span class="tooltip-value">${opts.fmtY ? opts.fmtY(val) : fmt.numFull(val)}</span></div>`;
       }
       tooltip.innerHTML = html;
       tooltip.classList.add('show');
@@ -919,16 +932,17 @@ function renderOverview() {
   const impChange = prev ? fmt.change(curr.impressions, prev.impressions) : { text: '—', cls: 'flat' };
   const clickChange = prev ? fmt.change(curr.clicks, prev.clicks) : { text: '—', cls: 'flat' };
   const ctrChange = prev ? fmt.change(curr.ctr, prev.ctr) : { text: '—', cls: 'flat' };
+  // Position: lower = better. So decrease = green (up), increase = red (down)
   const posChange = prev ? {
     text: (curr.position - prev.position).toFixed(1),
     cls: curr.position < prev.position ? 'up' : curr.position > prev.position ? 'down' : 'flat'
   } : { text: '—', cls: 'flat' };
 
   document.getElementById('kpiGrid').innerHTML = `
-    <div class="kpi-tile"><div class="kpi-label">Total Impressions</div><div class="kpi-value">${fmt.num(curr.impressions)}</div><span class="kpi-change ${impChange.cls}">${impChange.text}</span></div>
-    <div class="kpi-tile"><div class="kpi-label">Total Clicks</div><div class="kpi-value">${fmt.num(curr.clicks)}</div><span class="kpi-change ${clickChange.cls}">${clickChange.text}</span></div>
-    <div class="kpi-tile"><div class="kpi-label">Avg CTR</div><div class="kpi-value">${fmt.pct(curr.ctr)}</div><span class="kpi-change ${ctrChange.cls}">${ctrChange.text}</span></div>
-    <div class="kpi-tile"><div class="kpi-label">Avg Position</div><div class="kpi-value">${fmt.pos(curr.position)}</div><span class="kpi-change ${posChange.cls}">${posChange.cls === 'up' ? '&#9650;' : posChange.cls === 'down' ? '&#9660;' : ''} ${posChange.text}</span></div>
+    <div class="kpi-tile"><div class="kpi-label">Total Impressions</div><div class="kpi-value">${fmt.num(curr.impressions)}</div><span class="kpi-change ${impChange.cls}">${impChange.text} MoM</span></div>
+    <div class="kpi-tile"><div class="kpi-label">Total Clicks</div><div class="kpi-value">${fmt.num(curr.clicks)}</div><span class="kpi-change ${clickChange.cls}">${clickChange.text} MoM</span></div>
+    <div class="kpi-tile"><div class="kpi-label">Avg CTR</div><div class="kpi-value">${fmt.pct(curr.ctr)}</div><span class="kpi-change ${ctrChange.cls}">${ctrChange.text} MoM</span></div>
+    <div class="kpi-tile"><div class="kpi-label">Avg Position</div><div class="kpi-value">${fmt.pos(curr.position)}</div><span class="kpi-change ${posChange.cls}">${posChange.cls === 'up' ? '&#9650;' : posChange.cls === 'down' ? '&#9660;' : ''} ${posChange.text} MoM</span></div>
   `;
 
   renderAlerts();
@@ -985,13 +999,24 @@ function renderSiteGrid() {
     return `<div class="site-card" data-site="${s.code}">
       <div class="site-card-header"><span class="site-card-name">${s.name}</span><span class="site-card-lang">${s.lang}</span></div>
       <div class="site-card-stats">
-        <div><div class="site-stat-label">Impressions</div><div class="site-stat-value">${fmt.num(curr.impressions)} <span class="kpi-change ${impChange.cls}" style="font-size:11px">${impChange.text}</span></div></div>
+        <div><div class="site-stat-label">Impressions</div><div class="site-stat-value">${fmt.num(curr.impressions)} <span class="kpi-change ${impChange.cls}" style="font-size:11px">${impChange.text} MoM</span></div></div>
         <div><div class="site-stat-label">Avg Position</div><div class="site-stat-value">${fmt.pos(curr.position)}</div></div>
         <div><div class="site-stat-label">CTR</div><div class="site-stat-value">${fmt.pct(curr.ctr)}</div></div>
         <div><div class="site-stat-label">Queries</div><div class="site-stat-value">${s.queries.length}</div></div>
-      </div></div>`;
+      </div>
+      <div class="site-ai-summary loading" id="ai-${s.code}">AI analysis loading...</div>
+      </div>`;
   }).join('');
   document.querySelectorAll('.site-card').forEach(c => c.addEventListener('click', () => { state.selectedSite = c.dataset.site; switchTab('detail'); }));
+  // Trigger AI summaries for all visible sites
+  if (OPENAI_API_KEY) {
+    generateSiteAISummaries(sites);
+  } else {
+    sites.forEach(s => {
+      const el = document.getElementById('ai-' + s.code);
+      if (el) { el.textContent = 'Add API key in config.js for AI analysis'; el.classList.remove('loading'); }
+    });
+  }
 }
 
 function renderDetail() {
@@ -1127,6 +1152,43 @@ async function generateInsights(scope) {
     panel.innerHTML = `<div class="ai-panel"><div class="ai-panel-header"><span class="ai-panel-title">AI Insights — ${fmt.monthLabel(month)}</span></div><div class="ai-panel-body">${text.split('\n').filter(l => l.trim()).map(l => `<p>${l}</p>`).join('')}</div></div>`;
   } catch (err) {
     panel.innerHTML = `<div class="ai-panel"><div class="ai-panel-body" style="color:var(--negative)">Failed to generate insights: ${err.message}</div></div>`;
+  }
+}
+
+// ======================================================
+// AI SITE SUMMARIES (auto-generated on load)
+// ======================================================
+async function generateSiteAISummaries(sites) {
+  const month = state.month, prevMonth = getPrevMonth(month);
+  // Build all prompts and send in parallel (batched to avoid rate limits)
+  const batchSize = 4;
+  for (let i = 0; i < sites.length; i += batchSize) {
+    const batch = sites.slice(i, i + batchSize);
+    await Promise.all(batch.map(async (site) => {
+      const el = document.getElementById('ai-' + site.code);
+      if (!el) return;
+      const curr = getSiteMonthData(site, month);
+      const prev = prevMonth ? getSiteMonthData(site, prevMonth) : null;
+      const qSummary = site.queries.slice(0, 8).map(q => {
+        const c = q.months[month] || {};
+        return `"${q.query}": ${c.impressions || 0} imp, pos ${(c.position || 0).toFixed(1)}`;
+      }).join('; ');
+      const prompt = `You are a search analytics expert. In exactly 1-2 sentences, summarize the search notoriety status of ${site.name} for ${fmt.monthLabel(month)}. Data: ${curr.impressions} impressions (${prev ? ((curr.impressions - prev.impressions) / (prev.impressions || 1) * 100).toFixed(0) + '% MoM' : 'no prior month'}), CTR ${curr.ctr.toFixed(1)}%, avg position ${curr.position.toFixed(1)}, ${site.queries.length} queries tracked. Top queries: ${qSummary}. ${site.objectives ? 'Objectives: ' + site.objectives.split('\n')[0] : ''}. Be direct and specific. No intro phrases.`;
+      try {
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
+          body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], max_tokens: 100, temperature: 0.3 })
+        });
+        const data = await res.json();
+        const text = data.choices?.[0]?.message?.content || '';
+        el.textContent = text;
+        el.classList.remove('loading');
+      } catch (err) {
+        el.textContent = 'Could not generate analysis.';
+        el.classList.remove('loading');
+      }
+    }));
   }
 }
 
