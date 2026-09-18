@@ -970,7 +970,6 @@ function renderOverview() {
   document.getElementById('kpiGrid').innerHTML = `
     <div class="kpi-tile"><div class="kpi-label">Total Impressions</div><div class="kpi-value">${fmt.num(curr.impressions)}</div><span class="kpi-change ${impChange.cls}">${impChange.text} MoM</span></div>
     <div class="kpi-tile"><div class="kpi-label">Total Clicks</div><div class="kpi-value">${fmt.num(curr.clicks)}</div><span class="kpi-change ${clickChange.cls}">${clickChange.text} MoM</span></div>
-    <div class="kpi-tile"><div class="kpi-label">Avg CTR</div><div class="kpi-value">${fmt.pct(curr.ctr)}</div><span class="kpi-change ${ctrChange.cls}">${ctrChange.text} MoM</span></div>
     <div class="kpi-tile"><div class="kpi-label">Avg Position</div><div class="kpi-value">${fmt.pos(curr.position)}</div><span class="kpi-change ${posChange.cls}">${posChange.cls === 'up' ? '&#9650;' : posChange.cls === 'down' ? '&#9660;' : ''} ${posChange.text} MoM</span></div>
   `;
 
@@ -1237,8 +1236,9 @@ async function generateInsights(scope) {
   }
   try {
     const res = await fetch(AI_PROXY_URL, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: prompt, max_tokens: 500 })
+      method: 'POST',
+      body: JSON.stringify({ prompt: prompt, max_tokens: 500 }),
+      redirect: 'follow'
     });
     const data = await res.json();
     const text = data.text || data.choices?.[0]?.message?.content || 'No response generated.';
@@ -1270,8 +1270,8 @@ async function generateSiteAISummaries(sites) {
       try {
         const res = await fetch(AI_PROXY_URL, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: prompt, max_tokens: 100 })
+          body: JSON.stringify({ prompt: prompt, max_tokens: 100 }),
+          redirect: 'follow'
         });
         const data = await res.json();
         const text = data.text || data.choices?.[0]?.message?.content || '';
