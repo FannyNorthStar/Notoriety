@@ -567,24 +567,38 @@ var AI_PROXY_URL = 'https://script.google.com/macros/s/AKfycbyITmH6HKw1qAGr6CHgN
 // ======================================================
 const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSHFkti4Ubga62vEjVfFHaxzzTdCuPLYXbIiMDVn0iOsiGwragSS4FajGRAY1P6Q_AcJUBT4SopnZCk/pub?gid=1679156358&single=true&output=csv';
 
-// Site metadata (static config - these don't change often)
+// Objectives tab CSV URL (update gid after creating the tab)
+const OBJECTIVES_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSHFkti4Ubga62vEjVfFHaxzzTdCuPLYXbIiMDVn0iOsiGwragSS4FajGRAY1P6Q_AcJUBT4SopnZCk/pub?gid=1991638599&single=true&output=csv';
+
+// Objectives loaded from sheet: array of { site, start, end, objective }
+let OBJECTIVES_DATA = [];
+
+// Get objectives for a site in a specific month
+function getObjectivesForSite(siteCode, month) {
+  return OBJECTIVES_DATA
+    .filter(o => o.site === siteCode && month >= o.start && month <= o.end)
+    .map(o => o.objective)
+    .join('\n');
+}
+
+// Site metadata (static config - no objectives here, they come from the sheet)
 const SITE_META = {
-  'AAL': { name: 'Al Aire Libre', lang: 'es', objectives: 'Colo Colo: consistently in Top 3 with CTR>6%\nU de Chile: consistently in Top 3 with CTR>6%\nU Catolica: consistently in Top 5 with CTR>5%' },
-  'AF(en)': { name: 'Afrik Foot', lang: 'en', objectives: 'Victor Osimhen: At least 10k monthly impressions + CTR>3%\nAdemola Lookman: At least 5k impressions + CTR>3%\nBafana Bafana: Keep position in Top 3 with 100k monthly impressions', sub: { 'AFNG': 'AF NG', 'AFZA': 'AF ZA' } },
-  'AF(fr)': { name: 'Afrik Foot', lang: 'fr', objectives: 'equipe du maroc de football: Consistently in Top 3 + CTR>10%\nequipe d\'algerie de football: Consistently in Top 3 + CTR>10%' },
-  'CDA':  { name: "Calcio d'Angolo", lang: 'it', objectives: 'Serie A: establish presence in Top 10 for core queries' },
-  'FGG':  { name: 'Football Ground Guide', lang: 'en', objectives: 'Stadium guides: maintain Top 5 for key grounds' },
-  'FP':   { name: 'Fotbal Portal', lang: 'cz', objectives: 'Czech football queries: maintain Top 3 presence' },
-  'FW':   { name: 'Football Whispers', lang: 'en', objectives: 'Brand searches: maintain >50k monthly impressions' },
-  'LB':   { name: 'Lakers Brasil', lang: 'pt-br', objectives: 'Lakers queries: Top 3 in PT-BR market' },
-  'MFT':  { name: 'Mr Fix Its Tips', lang: 'en', objectives: 'Football betting tips: maintain Top 5' },
-  'SB':   { name: 'Solo Basket', lang: 'es', objectives: 'Basketball queries in Spanish market: Top 5' },
-  'SM':   { name: 'SportsMole', lang: 'en', objectives: 'Brand searches: maintain strong branded CTR >15%' },
-  'SN':   { name: 'Soccernet.ng', lang: 'en', objectives: 'Nigerian football queries: Top 3 with >50k impressions' },
-  'TM':   { name: 'Topmercato.fr', lang: 'fr', objectives: 'Transfer market queries (mercato om, psg, etc.): Top 3 in French market' },
-  'Trivela': { name: 'Trivela', lang: 'pt-br', objectives: 'Club queries: Top 5 for major Brazilian and international clubs' },
-  'UDE':  { name: 'UmDoisEsportes', lang: 'pt-br', objectives: 'Brazilian sports queries: establish Top 10 presence' },
-  'Vringe': { name: 'Vringe', lang: 'ru', objectives: 'Russian market football queries: Top 5' }
+  'AAL': { name: 'Al Aire Libre', lang: 'es' },
+  'AF(en)': { name: 'Afrik Foot', lang: 'en', sub: { 'AFNG': 'AF NG', 'AFZA': 'AF ZA' } },
+  'AF(fr)': { name: 'Afrik Foot', lang: 'fr' },
+  'CDA':  { name: "Calcio d'Angolo", lang: 'it' },
+  'FGG':  { name: 'Football Ground Guide', lang: 'en' },
+  'FP':   { name: 'Fotbal Portal', lang: 'cz' },
+  'FW':   { name: 'Football Whispers', lang: 'en' },
+  'LB':   { name: 'Lakers Brasil', lang: 'pt-br' },
+  'MFT':  { name: 'Mr Fix Its Tips', lang: 'en' },
+  'SB':   { name: 'Solo Basket', lang: 'es' },
+  'SM':   { name: 'SportsMole', lang: 'en' },
+  'SN':   { name: 'Soccernet.ng', lang: 'en' },
+  'TM':   { name: 'Topmercato.fr', lang: 'fr' },
+  'Trivela': { name: 'Trivela', lang: 'pt-br' },
+  'UDE':  { name: 'UmDoisEsportes', lang: 'pt-br' },
+  'Vringe': { name: 'Vringe', lang: 'ru' }
 };
 
 // Brand terms for branded vs authority detection
@@ -689,12 +703,11 @@ function processSheetData(rows) {
 
     // Build site structure
     if (!sites[currentTab]) {
-      const meta = SITE_META[currentTab] || { name: currentName || currentTab, lang: 'en', objectives: '' };
+      const meta = SITE_META[currentTab] || { name: currentName || currentTab, lang: 'en' };
       sites[currentTab] = {
         code: currentTab,
         name: meta.name || currentName,
         lang: meta.lang,
-        objectives: meta.objectives,
         queries: {}
       };
     }
@@ -1119,8 +1132,9 @@ function renderDetail() {
 
   document.getElementById('detailSiteName').textContent = site.name;
   document.getElementById('detailSiteMeta').textContent = `${site.code} · ${site.lang.toUpperCase()} · ${site.queries.length} tracked queries`;
-  document.getElementById('detailObjectives').innerHTML = site.objectives
-    ? `<div class="objectives"><strong>Objectives:</strong> ${site.objectives.replace(/\n/g, '<br>')}</div>` : '';
+  const siteObjectives = getObjectivesForSite(site.code, state.month);
+  document.getElementById('detailObjectives').innerHTML = siteObjectives
+    ? `<div class="objectives"><strong>Objectives:</strong> ${siteObjectives.replace(/\n/g, '<br>')}</div>` : '';
 
   const impChange = prev ? fmt.change(curr.impressions, prev.impressions) : { text: '—', cls: 'flat' };
   const clickChange = prev ? fmt.change(curr.clicks, prev.clicks) : { text: '—', cls: 'flat' };
@@ -1232,19 +1246,26 @@ async function generateInsights(scope) {
       const c = q.months[month] || {}, p = prevMonth ? (q.months[prevMonth] || {}) : {};
       return `"${q.query}" (${q.type}): ${c.impressions || 0} imp, ${c.clicks || 0} clicks, CTR ${(c.ctr || 0).toFixed(1)}%, Pos ${(c.position || 0).toFixed(1)}` + (p.impressions ? `, prev: ${p.impressions} imp` : '');
     }).join('\n');
-    prompt = `You are a search analytics expert. Analyze ${site.name}'s search query performance for ${fmt.monthLabel(month)}.\n\n${site.objectives ? 'Objectives: ' + site.objectives + '\n\n' : ''}Queries:\n${qd}\n\nGive: 1) Trend summary (2 sentences), 2) Highest visibility queries, 3) Best CTR performers, 4) Flags/concerns. Keep it brief and direct.`;
+    const detailObj = getObjectivesForSite(site.code, month);
+    prompt = `You are a search analytics expert. Analyze ${site.name}'s search query performance for ${fmt.monthLabel(month)}.\n\n${detailObj ? 'Objectives: ' + detailObj + '\n\n' : ''}Queries:\n${qd}\n\nGive: 1) Trend summary (2 sentences), 2) Highest visibility queries, 3) Best CTR performers, 4) Flags/concerns. Keep it brief and direct.`;
   }
   try {
-    const res = await fetch(AI_PROXY_URL, {
+    const res = await fetch(AI_PROXY_URL + '?t=' + Date.now(), {
       method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ prompt: prompt, max_tokens: 500 }),
       redirect: 'follow'
     });
-    const data = await res.json();
-    const text = data.text || data.choices?.[0]?.message?.content || 'No response generated.';
-    panel.innerHTML = `<div class="ai-panel"><div class="ai-panel-header"><span class="ai-panel-title">AI Insights — ${fmt.monthLabel(month)}</span></div><div class="ai-panel-body">${text.split('\n').filter(l => l.trim()).map(l => `<p>${l}</p>`).join('')}</div></div>`;
+    const raw = await res.text();
+    let data; try { data = JSON.parse(raw); } catch { data = {}; }
+    const text = data.text || data.error || 'No response from proxy. Raw: ' + raw.slice(0, 200);
+    if (data.error) {
+      panel.innerHTML = `<div class="ai-panel"><div class="ai-panel-body" style="color:var(--negative)">Proxy error: ${data.error}</div></div>`;
+    } else {
+      panel.innerHTML = `<div class="ai-panel"><div class="ai-panel-header"><span class="ai-panel-title">AI Insights — ${fmt.monthLabel(month)}</span></div><div class="ai-panel-body">${text.split('\n').filter(l => l.trim()).map(l => `<p>${l}</p>`).join('')}</div></div>`;
+    }
   } catch (err) {
-    panel.innerHTML = `<div class="ai-panel"><div class="ai-panel-body" style="color:var(--negative)">Failed to generate insights: ${err.message}</div></div>`;
+    panel.innerHTML = `<div class="ai-panel"><div class="ai-panel-body" style="color:var(--negative)">Failed: ${err.message}</div></div>`;
   }
 }
 
@@ -1254,7 +1275,7 @@ async function generateInsights(scope) {
 async function generateSiteAISummaries(sites) {
   const month = state.month, prevMonth = getPrevMonth(month);
   // Build all prompts and send in parallel (batched to avoid rate limits)
-  const batchSize = 4;
+  const batchSize = 2;
   for (let i = 0; i < sites.length; i += batchSize) {
     const batch = sites.slice(i, i + batchSize);
     await Promise.all(batch.map(async (site) => {
@@ -1266,19 +1287,21 @@ async function generateSiteAISummaries(sites) {
         const c = q.months[month] || {};
         return `"${q.query}": ${c.impressions || 0} imp, pos ${(c.position || 0).toFixed(1)}`;
       }).join('; ');
-      const prompt = `You are a search analytics expert. In exactly 1-2 sentences, summarize the search notoriety status of ${site.name} for ${fmt.monthLabel(month)}. Data: ${curr.impressions} impressions (${prev ? ((curr.impressions - prev.impressions) / (prev.impressions || 1) * 100).toFixed(0) + '% MoM' : 'no prior month'}), CTR ${curr.ctr.toFixed(1)}%, avg position ${curr.position.toFixed(1)}, ${site.queries.length} queries tracked. Top queries: ${qSummary}. ${site.objectives ? 'Objectives: ' + site.objectives.split('\n')[0] : ''}. Be direct and specific. No intro phrases.`;
+      const cardObj = getObjectivesForSite(site.code, month);
+      const prompt = `You are a search analytics expert. In exactly 1-2 sentences, summarize the search notoriety status of ${site.name} for ${fmt.monthLabel(month)}. Data: ${curr.impressions} impressions (${prev ? ((curr.impressions - prev.impressions) / (prev.impressions || 1) * 100).toFixed(0) + '% MoM' : 'no prior month'}), CTR ${curr.ctr.toFixed(1)}%, avg position ${curr.position.toFixed(1)}, ${site.queries.length} queries tracked. Top queries: ${qSummary}. ${cardObj ? 'Objectives: ' + cardObj.split('\n')[0] : ''}. Be direct and specific. No intro phrases.`;
       try {
-        const res = await fetch(AI_PROXY_URL, {
+        const res = await fetch(AI_PROXY_URL + '?t=' + Date.now(), {
           method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({ prompt: prompt, max_tokens: 100 }),
           redirect: 'follow'
         });
-        const data = await res.json();
-        const text = data.text || data.choices?.[0]?.message?.content || '';
-        el.textContent = text;
+        const raw = await res.text();
+        let data; try { data = JSON.parse(raw); } catch { data = {}; }
+        el.textContent = data.text || data.error || 'No response. Raw: ' + raw.slice(0, 100);
         el.classList.remove('loading');
       } catch (err) {
-        el.textContent = 'Could not generate analysis.';
+        el.textContent = 'Fetch failed: ' + err.message;
         el.classList.remove('loading');
       }
     }));
@@ -1290,10 +1313,28 @@ async function generateSiteAISummaries(sites) {
 // ======================================================
 async function init() {
   try {
-    const res = await fetch(SHEET_CSV_URL);
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-    const csvText = await res.text();
+    // Fetch data and objectives in parallel
+    const [dataRes, objRes] = await Promise.all([
+      fetch(SHEET_CSV_URL),
+      fetch(OBJECTIVES_CSV_URL).catch(() => null)
+    ]);
+    if (!dataRes.ok) throw new Error(`HTTP ${dataRes.status}: ${dataRes.statusText}`);
+    const csvText = await dataRes.text();
     if (!csvText.trim()) throw new Error('Empty response from Google Sheets');
+
+    // Parse objectives if available
+    if (objRes && objRes.ok) {
+      const objCsv = await objRes.text();
+      if (objCsv.trim()) {
+        const objRows = parseCSV(objCsv);
+        OBJECTIVES_DATA = objRows.map(r => ({
+          site: (r['Site'] || '').trim(),
+          start: normalizeMonth(r['Start'] || '') || '2000-01',
+          end: normalizeMonth(r['End'] || '') || '2099-12',
+          objective: (r['Objective'] || '').trim()
+        })).filter(o => o.site && o.objective);
+      }
+    }
 
     const rows = parseCSV(csvText);
     if (rows.length === 0) throw new Error('No data rows found in the sheet');
